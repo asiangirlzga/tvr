@@ -5,9 +5,15 @@ Pairing connects the phone app to your TV once. After that the TV remembers the 
 **Nothing needs to be installed on the TV.** The code screen is built into Android TV / Google TV.
 Install the app on the phone only.
 
-## What you need
+## CloudWalker "Cloud TV" / Cloud TV OS
 
-- A TV running **Android TV or Google TV** (not Samsung, LG, Roku or Fire TV).
+No pairing and no code. Turn the TV on, make sure the phone is on the same Wi-Fi, open the app, and tap the TV
+under **TVs on your network** (it shows as "Cloud TV"). If it isn't listed, add it by IP address and enter the
+port too. If a button does nothing, see the note under the TV's name and the **Send button names** switch.
+
+## Android TV / Google TV: what you need
+
+- A TV running **Android TV or Google TV**.
 - The TV is **turned on** and connected to Wi-Fi.
 - The phone is on the **same Wi-Fi network** as the TV. No Bluetooth is used.
 

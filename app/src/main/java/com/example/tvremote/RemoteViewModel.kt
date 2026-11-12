@@ -5,13 +5,16 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.tvremote.data.DeviceStore
 import com.example.tvremote.data.PairedTv
+import com.example.tvremote.data.TvType
 import com.example.tvremote.discovery.DiscoveredTv
 import com.example.tvremote.discovery.TvDiscovery
 import com.example.tvremote.protocol.CertStore
+import com.example.tvremote.protocol.CloudTvClient
 import com.example.tvremote.protocol.ConnectionState
 import com.example.tvremote.protocol.PairingClient
 import com.example.tvremote.protocol.PairingException
 import com.example.tvremote.protocol.RemoteClient
+import com.example.tvremote.protocol.TvController
 import com.example.tvremote.protocol.TvKey
 import com.example.tvremote.voice.TvAction
 import com.example.tvremote.voice.TvApp
@@ -56,6 +59,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private val _connection = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connection: StateFlow<ConnectionState> = _connection.asStateFlow()
 
+    private val _diagnostic = MutableStateFlow("")
+    /** Short note about the last request to the TV, to help work out why a button didn't work. */
+    val diagnostic: StateFlow<String> = _diagnostic.asStateFlow()
+
     private val _pairing = MutableStateFlow<PairingUi>(PairingUi.Idle)
     val pairing: StateFlow<PairingUi> = _pairing.asStateFlow()
 
@@ -65,8 +72,11 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     private val _language = MutableStateFlow(VoiceLanguage.fromTag(store.languageTag))
     val language: StateFlow<VoiceLanguage> = _language.asStateFlow()
 
-    private var remote: RemoteClient? = null
-    private var remoteWatcher: Job? = null
+    private val _cloudKeyNames = MutableStateFlow(store.cloudKeyNames)
+    val cloudKeyNames: StateFlow<Boolean> = _cloudKeyNames.asStateFlow()
+
+    private var controller: TvController? = null
+    private var watcher: Job? = null
     private var pairingClient: PairingClient? = null
     private var pairingJob: Job? = null
     private var commandJob: Job? = null
@@ -77,9 +87,9 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             discovery.tvs.collect { found ->
                 var changed = false
                 for (p in _paired.value) {
-                    val moved = found.firstOrNull { it.name == p.name && it.host != p.host }
+                    val moved = found.firstOrNull { it.name == p.name && it.type == p.type && (it.host != p.host || (it.port != p.port && it.port > 0 && p.type == TvType.CLOUD_TV)) }
                     if (moved != null) {
-                        store.save(p.copy(host = moved.host))
+                        store.save(p.copy(host = moved.host, port = if (p.type == TvType.CLOUD_TV) moved.port else p.port))
                         changed = true
                     }
                 }
@@ -93,12 +103,18 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Connection -------------------------------------------------------------------------
 
     fun connect(tv: PairedTv) {
-        closeRemote()
+        closeController()
         markActive(tv)
         discovery.stop()
-        val client = RemoteClient(certStore, tv.host, tv.fingerprint)
-        remote = client
-        remoteWatcher = viewModelScope.launch { client.state.collect { _connection.value = it } }
+        val client: TvController = when (tv.type) {
+            TvType.ANDROID_TV -> RemoteClient(certStore, tv.host, tv.fingerprint.ifEmpty { null })
+            TvType.CLOUD_TV -> CloudTvClient(tv.host, tv.port) { _cloudKeyNames.value }
+        }
+        controller = client
+        watcher = viewModelScope.launch {
+            launch { client.state.collect { _connection.value = it } }
+            launch { client.diagnostic.collect { _diagnostic.value = it } }
+        }
         client.connect()
     }
 
@@ -113,7 +129,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Back to the TV list. */
     fun disconnect() {
-        closeRemote()
+        closeController()
         _activeTv.value = null
         store.lastHost = null
         discovery.start()
@@ -121,6 +137,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     fun repair() {
         val tv = _activeTv.value ?: return
+        if (tv.type == TvType.CLOUD_TV) {
+            reconnect()
+            return
+        }
         disconnect()
         startPairing(tv.host, tv.name)
     }
@@ -130,15 +150,50 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
         _paired.value = store.all()
     }
 
-    private fun closeRemote() {
+    private fun closeController() {
         commandJob?.cancel()
-        remoteWatcher?.cancel()
-        remote?.close()
-        remote = null
+        watcher?.cancel()
+        controller?.close()
+        controller = null
         _connection.value = ConnectionState.Disconnected
+        _diagnostic.value = ""
     }
 
-    // ---- Pairing ----------------------------------------------------------------------------
+    fun setCloudKeyNames(on: Boolean) {
+        store.cloudKeyNames = on
+        _cloudKeyNames.value = on
+    }
+
+    // ---- Adding TVs -------------------------------------------------------------------------
+
+    /** A TV found on the network was tapped. Cloud TVs need no pairing; Android TVs show a code. */
+    fun onDiscoveredTapped(tv: DiscoveredTv) {
+        when (tv.type) {
+            TvType.ANDROID_TV -> startPairing(tv.host, tv.name)
+            TvType.CLOUD_TV -> addCloudTv(tv.host, tv.name, tv.port)
+        }
+    }
+
+    /** Add by IP address. With a port it's a Cloud TV; without one it's an Android TV (pairing). */
+    fun addManual(host: String, portText: String) {
+        val h = host.trim()
+        if (h.isEmpty()) return
+        if (portText.isBlank()) {
+            startPairing(h, h)
+        } else {
+            val port = portText.trim().toIntOrNull()
+            if (port != null && port in 1..65535) addCloudTv(h, h, port)
+        }
+    }
+
+    private fun addCloudTv(host: String, name: String, port: Int) {
+        val tv = PairedTv(host = host, name = name, type = TvType.CLOUD_TV, port = port)
+        store.save(tv)
+        _paired.value = store.all()
+        connect(tv)
+    }
+
+    // ---- Pairing (Android TV / Google TV) ---------------------------------------------------
 
     fun startPairing(host: String, name: String) {
         cancelPairing()
@@ -204,11 +259,11 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Buttons ----------------------------------------------------------------------------
 
     fun press(code: Int) {
-        remote?.sendKey(code)
+        controller?.sendKey(code)
     }
 
     fun openApp(app: TvApp) {
-        remote?.launchApp(app.link)
+        controller?.launchApp(app.link, app.label)
         _feedback.value = "Opening ${app.label}"
     }
 
@@ -242,7 +297,7 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun execute(action: TvAction) {
-        val client = remote
+        val client = controller
         if (client == null || _connection.value !is ConnectionState.Ready) {
             _feedback.value = "Not connected to a TV."
             return
@@ -258,13 +313,14 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                     client.sendKey(TvKey.digit(ch - '0'))
                     delay(250)
                 }
-                is TvAction.OpenLink -> client.launchApp(action.link)
+                is TvAction.OpenLink -> client.launchApp(action.link, action.label)
+                is TvAction.OpenByName -> client.launchApp("", action.name)
             }
         }
     }
 
     override fun onCleared() {
-        closeRemote()
+        closeController()
         cancelPairing()
         discovery.stop()
         voice.release()

@@ -31,4 +31,18 @@ object TvKey {
 
     /** KEYCODE_0 is 7, so digits 0-9 map to 7-16. */
     fun digit(d: Int): Int = 7 + d
+
+    private val names = mapOf(
+        HOME to "HOME", BACK to "BACK", DPAD_UP to "DPAD_UP", DPAD_DOWN to "DPAD_DOWN",
+        DPAD_LEFT to "DPAD_LEFT", DPAD_RIGHT to "DPAD_RIGHT", DPAD_CENTER to "DPAD_CENTER",
+        VOLUME_UP to "VOLUME_UP", VOLUME_DOWN to "VOLUME_DOWN", POWER to "POWER", MENU to "MENU",
+        SEARCH to "SEARCH", MEDIA_PLAY_PAUSE to "MEDIA_PLAY_PAUSE", MEDIA_NEXT to "MEDIA_NEXT",
+        MEDIA_PREVIOUS to "MEDIA_PREVIOUS", MEDIA_REWIND to "MEDIA_REWIND",
+        MEDIA_FAST_FORWARD to "MEDIA_FAST_FORWARD", MEDIA_PLAY to "MEDIA_PLAY", MEDIA_PAUSE to "MEDIA_PAUSE",
+        VOLUME_MUTE to "VOLUME_MUTE", INFO to "INFO", CHANNEL_UP to "CHANNEL_UP",
+        CHANNEL_DOWN to "CHANNEL_DOWN", GUIDE to "GUIDE", SETTINGS to "SETTINGS", TV_INPUT to "TV_INPUT",
+    )
+
+    /** Android's name for a key (without the KEYCODE_ prefix), or the number if there is none. */
+    fun nameOf(code: Int): String = names[code] ?: if (code in 7..16) "KEYCODE_${code - 7}" else code.toString()
 }

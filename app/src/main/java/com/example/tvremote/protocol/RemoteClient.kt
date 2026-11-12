@@ -38,9 +38,11 @@ class RemoteClient(
     private val certStore: CertStore,
     private val host: String,
     private val pinnedFingerprint: String?,
-) {
+) : TvController {
     private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
-    val state: StateFlow<ConnectionState> = _state.asStateFlow()
+    override val state: StateFlow<ConnectionState> = _state.asStateFlow()
+
+    override val diagnostic: StateFlow<String> = MutableStateFlow("").asStateFlow()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val outbox = Channel<ByteArray>(Channel.UNLIMITED)
@@ -50,7 +52,7 @@ class RemoteClient(
     @Volatile private var closed = false
     private var job: Job? = null
 
-    fun connect() {
+    override fun connect() {
         if (job != null) return
         _state.value = ConnectionState.Connecting
         job = scope.launch {
@@ -66,18 +68,21 @@ class RemoteClient(
         }
     }
 
-    fun sendKey(code: Int, direction: Int = DIRECTION_SHORT) {
+    override fun sendKey(code: Int) = sendKey(code, DIRECTION_SHORT)
+
+    private fun sendKey(code: Int, direction: Int) {
         outbox.trySend(
             PbWriter().message(F_KEY_INJECT) { varint(1, code); varint(2, direction) }.toByteArray(),
         )
     }
 
-    /** Launches an app or deep link, e.g. "https://www.youtube.com" or "market://launch?id=<package>". */
-    fun launchApp(link: String) {
+    /** Launches a deep link, e.g. "https://www.youtube.com" or "market://launch?id=<package>". The label isn't needed here. */
+    override fun launchApp(link: String, label: String?) {
+        if (link.isBlank()) return
         outbox.trySend(PbWriter().message(F_APP_LINK) { string(1, link) }.toByteArray())
     }
 
-    fun close() {
+    override fun close() {
         closed = true
         outbox.close()
         job?.cancel()

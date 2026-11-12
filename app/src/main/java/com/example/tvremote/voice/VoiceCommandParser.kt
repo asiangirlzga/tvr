@@ -15,7 +15,11 @@ sealed interface TvAction {
         override val description: String get() = "Channel $digits"
     }
 
-    data class OpenLink(val link: String, override val description: String) : TvAction
+    /** Opens a known app. [label] is its display name, which lets TVs without deep links find it by name. */
+    data class OpenLink(val link: String, override val description: String, val label: String? = null) : TvAction
+
+    /** "Open <something>" where <something> isn't one of the built-in apps; the TV's own app list is searched. */
+    data class OpenByName(val name: String, override val description: String) : TvAction
 }
 
 private val noiseRegex = Regex("[^\\p{L}\\p{M}\\p{N}\\s]")
@@ -135,7 +139,16 @@ object VoiceCommandParser {
         for (rule in exactRules) {
             if (bare in rule.phrases) return key(rule, count)
         }
-        return null
+        return genericOpen(tokens)
+    }
+
+    private val genericOpenVerbs = setOf("open", "launch", "start")
+    private val genericOpenSkip = setOf("the", "app", "my", "please")
+
+    private fun genericOpen(tokens: List<String>): TvAction? {
+        if (tokens.size < 2 || tokens[0] !in genericOpenVerbs) return null
+        val name = tokens.drop(1).filterNot { it in genericOpenSkip }.joinToString(" ")
+        return if (name.isBlank()) null else TvAction.OpenByName(name, "Opening $name")
     }
 
     private fun key(rule: KeyRule, count: Int) =
@@ -145,7 +158,7 @@ object VoiceCommandParser {
         val query = (youtubeOn.find(text) ?: youtubeSearch.find(text))?.groupValues?.get(1)?.trim()
         if (query.isNullOrEmpty()) return null
         val encoded = URLEncoder.encode(query, "UTF-8")
-        return TvAction.OpenLink("https://www.youtube.com/results?search_query=$encoded", "YouTube: $query")
+        return TvAction.OpenLink("https://www.youtube.com/results?search_query=$encoded", "YouTube: $query", "YouTube")
     }
 
     private fun openApp(text: String): TvAction? {
@@ -153,7 +166,7 @@ object VoiceCommandParser {
         for ((alias, app) in aliasIndex) {
             if (!padded.contains(" $alias ")) continue
             val rest = padded.replace(" $alias ", " ").trim().split(' ').filter { it.isNotEmpty() }
-            if (rest.all { it in openWords }) return TvAction.OpenLink(app.link, "Opening ${app.label}")
+            if (rest.all { it in openWords }) return TvAction.OpenLink(app.link, "Opening ${app.label}", app.label)
         }
         return null
     }

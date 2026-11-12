@@ -79,6 +79,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -125,6 +126,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.tvremote.PairingUi
 import com.example.tvremote.RemoteViewModel
 import com.example.tvremote.data.PairedTv
+import com.example.tvremote.data.TvType
 import com.example.tvremote.protocol.ConnectionState
 import com.example.tvremote.protocol.TvKey
 import com.example.tvremote.voice.TvApps
@@ -154,6 +156,7 @@ private fun DeviceScreen(vm: RemoteViewModel) {
     val paired by vm.paired.collectAsStateWithLifecycle()
     val discovered by vm.discovered.collectAsStateWithLifecycle()
     var manualHost by rememberSaveable { mutableStateOf("") }
+    var manualPort by rememberSaveable { mutableStateOf("") }
     val newTvs = discovered.filter { d -> paired.none { it.host == d.host } }
 
     Scaffold(topBar = { TopAppBar(title = { Text("Voice TV Remote") }) }) { padding ->
@@ -174,7 +177,7 @@ private fun DeviceScreen(vm: RemoteViewModel) {
             if (paired.isNotEmpty()) {
                 item { SectionTitle("Paired TVs") }
                 items(paired, key = { "p-" + it.host }) { tv ->
-                    TvRow(tv.name, tv.host, onClick = { vm.connect(tv) }) {
+                    TvRow(tv.name, tv.subtitle, onClick = { vm.connect(tv) }) {
                         IconButton(onClick = { vm.forget(tv) }) {
                             Icon(Icons.Rounded.Delete, contentDescription = "Forget ${tv.name}")
                         }
@@ -192,24 +195,34 @@ private fun DeviceScreen(vm: RemoteViewModel) {
                 }
             }
             items(newTvs, key = { "d-" + it.host }) { tv ->
-                TvRow(tv.name, tv.host, onClick = { vm.startPairing(tv.host, tv.name) })
+                TvRow(tv.name, tv.subtitle, onClick = { vm.onDiscoveredTapped(tv) })
             }
             item { SectionTitle("Add by IP address") }
             item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = manualHost,
+                            onValueChange = { manualHost = it.trim() },
+                            label = { Text("TV IP, e.g. 192.168.1.20") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Button(
+                            onClick = { vm.addManual(manualHost, manualPort) },
+                            enabled = manualHost.isNotBlank() && (manualPort.isBlank() || manualPort.toIntOrNull() in 1..65535),
+                        ) { Text(if (manualPort.isBlank()) "Pair" else "Add") }
+                    }
                     OutlinedTextField(
-                        value = manualHost,
-                        onValueChange = { manualHost = it.trim() },
-                        label = { Text("TV IP, e.g. 192.168.1.20") },
+                        value = manualPort,
+                        onValueChange = { manualPort = it.filter(Char::isDigit).take(5) },
+                        label = { Text("Port (Cloud TV only, leave empty otherwise)") },
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                    Spacer(Modifier.width(12.dp))
-                    Button(
-                        onClick = { vm.startPairing(manualHost, manualHost) },
-                        enabled = manualHost.isNotBlank(),
-                    ) { Text("Pair") }
                 }
             }
         }
@@ -318,6 +331,7 @@ private fun CodeDialog(state: PairingUi.AwaitingCode, vm: RemoteViewModel) {
 @Composable
 private fun RemoteScreen(vm: RemoteViewModel, tv: PairedTv) {
     val connection by vm.connection.collectAsStateWithLifecycle()
+    val diagnostic by vm.diagnostic.collectAsStateWithLifecycle()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -325,6 +339,14 @@ private fun RemoteScreen(vm: RemoteViewModel, tv: PairedTv) {
                     Column {
                         Text(tv.name, maxLines = 1)
                         Text(statusText(connection), style = MaterialTheme.typography.labelSmall)
+                        if (diagnostic.isNotBlank()) {
+                            Text(
+                                diagnostic,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
                     }
                 },
                 actions = {
@@ -358,6 +380,7 @@ private fun RemoteScreen(vm: RemoteViewModel, tv: PairedTv) {
                 NavRow(vm)
                 ControlsRow(vm)
                 AppsRow(vm)
+                if (tv.type == TvType.CLOUD_TV) CloudOptions(vm)
             }
         }
     }
@@ -607,6 +630,24 @@ private fun Rocker(
         RemoteKey(upDescription, onUp, Modifier.size(52.dp), repeating = true) { Icon(Icons.Rounded.Add, null) }
         Text(label, Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.labelMedium)
         RemoteKey(downDescription, onDown, Modifier.size(52.dp), repeating = true) { Icon(Icons.Rounded.Remove, null) }
+    }
+}
+
+/** Cloud TV only: the one setting that may be needed if buttons do nothing. */
+@Composable
+private fun CloudOptions(vm: RemoteViewModel) {
+    val names by vm.cloudKeyNames.collectAsStateWithLifecycle()
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Send button names", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Turn on only if buttons do nothing. The note under the TV name shows the TV's reply.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = names, onCheckedChange = vm::setCloudKeyNames)
     }
 }
 

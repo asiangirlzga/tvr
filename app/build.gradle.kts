@@ -57,4 +57,6 @@ dependencies {
     implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
 
     testImplementation("junit:junit:4.13.2")
+    // Real JSON parser for unit tests (Android's own is only a stub on the JVM).
+    testImplementation("org.json:json:20240303")
 }

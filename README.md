@@ -13,8 +13,24 @@ on-screen buttons and **voice commands**. One APK installs on phones, tablets an
 - **Voice:** tap the mic and speak. The phone's speech recognizer turns speech into text; the text is
   matched to commands locally (`VoiceCommandParser`) and sent to the TV.
 
-Your phone and TV must be on the **same Wi-Fi network**. This works with Android TV / Google TV only
-(not Samsung Tizen, LG webOS, Roku or Fire TV).
+Your phone and TV must be on the **same Wi-Fi network**. It works with:
+
+- **Android TV / Google TV** (pair once with a 6-character code), and
+- **CloudWalker "Cloud TV" / Cloud TV OS** (no pairing: tap the TV when it appears).
+
+It does not work with Samsung Tizen, LG webOS, Roku or Fire TV.
+
+### Cloud TV notes
+
+Cloud TV support was written by reading how the official *Cloud TV Remote* app talks to the TV (it announces
+itself as `_cloudwalker._tcp` and takes button presses and app launches as small web requests). It has not been
+tested on a real Cloud TV yet. The app works out http vs https and key numbers vs key names by itself on the first
+connection. If buttons do nothing, the grey note under the TV's name shows the TV's last reply (for example
+`GET /input/?keycode=24 → 200`); send that to the developer. There is also a **Send button names** switch on the
+remote screen for Cloud TVs. You can add a Cloud TV by IP address if you also know its port.
+
+Voice in this app is recognised on the phone and prefers offline recognition. (The official Cloud TV Remote
+sends speech to CloudWalker's servers.)
 
 ## Voice commands
 
