@@ -1,0 +1,8 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+build/
+*.apk
+# Speech model is downloaded by CI (see README); too large to keep in git.
+app/src/main/assets/model-en-us/

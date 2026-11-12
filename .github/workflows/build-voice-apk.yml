@@ -1,0 +1,96 @@
+name: Build Private Voice Control APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "phone-voice/**"
+      - ".github/workflows/build-voice-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  VOSK_MODEL: vosk-model-small-en-us-0.15
+  # SHA-256 of the model zip. The first run prints it; it is then pinned here so the build
+  # fails if the downloaded file ever changes. Empty means "not pinned yet".
+  VOSK_MODEL_SHA256: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: phone-voice
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+
+      - name: Cache speech model
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: phone-voice/${{ env.VOSK_MODEL }}.zip
+          key: ${{ env.VOSK_MODEL }}-zip
+
+      - name: Download speech model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: curl -fsSL -o "$VOSK_MODEL.zip" "https://alphacephei.com/vosk/models/$VOSK_MODEL.zip"
+
+      - name: Verify and unpack speech model
+        run: |
+          sha256sum "$VOSK_MODEL.zip" | tee model.sha256
+          if [ -n "$VOSK_MODEL_SHA256" ]; then
+            echo "$VOSK_MODEL_SHA256  $VOSK_MODEL.zip" | sha256sum -c -
+          else
+            echo "::warning::Model checksum is not pinned yet."
+          fi
+          unzip -q "$VOSK_MODEL.zip"
+          mkdir -p app/src/main/assets
+          mv "$VOSK_MODEL" app/src/main/assets/model-en-us
+          uuidgen > app/src/main/assets/model-en-us/uuid
+          du -sh app/src/main/assets/model-en-us
+
+      - name: Unit tests
+        run: gradle :app:testDebugUnitTest --no-daemon
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --no-daemon
+
+      - name: Verify the APK cannot use the network
+        run: |
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          aapt2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+          "$aapt2" dump permissions "$apk" | tee permissions.txt
+          if grep -Eiq 'INTERNET|ACCESS_NETWORK_STATE|ACCESS_WIFI_STATE|CHANGE_NETWORK_STATE|CHANGE_WIFI_STATE' permissions.txt; then
+            echo "::error::APK requests a network permission. Failing the build to protect privacy."
+            exit 1
+          fi
+          echo "OK: no network permissions requested."
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: private-voice-debug-apk
+          path: phone-voice/app/build/outputs/apk/debug/*.apk
+
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk private-voice-control.apk
+          sha=$(sha256sum private-voice-control.apk | cut -d' ' -f1)
+          gh release delete voice-latest --yes --cleanup-tag || true
+          gh release create voice-latest private-voice-control.apk \
+            --title "Private Voice Control (latest build)" \
+            --prerelease \
+            --notes "Debug-signed APK from commit ${GITHUB_SHA::7}. No network permissions (checked in CI). APK SHA-256: $sha. Speech model: $VOSK_MODEL, zip SHA-256: $(cut -d' ' -f1 model.sha256)."

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Private Voice Control</string>
+    <string name="accessibility_description">Lets Private Voice Control press Home, Back and Recents, open the notification panel, lock the screen, take screenshots and swipe, when you ask by voice. It cannot read what is on your screen. Everything stays on your phone and the app has no internet access.</string>
+</resources>
