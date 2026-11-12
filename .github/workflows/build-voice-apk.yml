@@ -13,9 +13,9 @@ permissions:
 
 env:
   VOSK_MODEL: vosk-model-small-en-us-0.15
-  # SHA-256 of the model zip. The first run prints it; it is then pinned here so the build
-  # fails if the downloaded file ever changes. Empty means "not pinned yet".
-  VOSK_MODEL_SHA256: ""
+  # SHA-256 of the model zip, recorded from the first download (trust on first use). The build
+  # fails if the downloaded file ever differs.
+  VOSK_MODEL_SHA256: "30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498"
 
 jobs:
   build:
